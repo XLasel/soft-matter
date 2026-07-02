@@ -1,0 +1,87 @@
+/* ---------- design tokens ---------- */
+:root {
+  /* sunset palette (from INSPIRITE collage) */
+  --sky-top:    #8fb3f5;
+  --sky-lilac:  #b9b6f0;
+  --sky-pink:   #f2bcd8;
+  --sky-peach:  #ffd9c0;
+  --sky-violet: #e5b3dd;
+
+  --ink:        #2b2440;
+  --ink-soft:   rgba(43, 36, 64, .62);
+
+  --chrome-gradient: linear-gradient(115deg,
+    #ffffff 0%, #aebdf5 28%, #ffd7ec 52%, #8fa4ee 74%, #fff2f7 100%);
+
+  --font-display: 'Clash Display', sans-serif;
+  --font-accent:  'EB Garamond', serif;
+  --font-body:    'Inter', sans-serif;
+
+  --pad: clamp(20px, 3.5vw, 48px);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  background: linear-gradient(180deg,
+    var(--sky-top) 0%, var(--sky-lilac) 30%, var(--sky-pink) 55%,
+    var(--sky-peach) 78%, var(--sky-violet) 100%);
+  background-attachment: fixed;
+}
+
+/* ---------- webgl canvas: fixed behind the DOM ---------- */
+.webgl {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none; /* pointer tracked on window, so scroll stays native */
+}
+
+/* ---------- film grain ---------- */
+.grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: 40;
+  opacity: .55; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.08 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---------- typography helpers ---------- */
+.display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -.02em;
+  line-height: 1.02;
+}
+
+/* chrome lives on the shapes; type stays matte — except rare accents */
+.accent {
+  font-family: var(--font-accent);
+  font-style: italic;
+  font-weight: 500;
+  background: var(--chrome-gradient);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  filter: drop-shadow(0 2px 12px rgba(120, 110, 200, .4));
+}
+
+.eyebrow {
+  font-size: 13px; font-weight: 600;
+  letter-spacing: .22em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* ---------- layout ---------- */
+main { position: relative; z-index: 10; }
+
+.section {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--pad);
+}
