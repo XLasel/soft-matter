@@ -25,8 +25,8 @@ export class Experience {
     this.renderer.toneMappingExposure = 1.1
 
     this.scene = new THREE.Scene()
-    this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50)
-    this.camera.position.set(0, 0, 3.6)
+    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 50)
+    this.camera.position.set(0, 0, 4.2)
 
     // start HDR load early — chrome is fully metallic and reads black without env
     const envReady = buildEnvironment(this.renderer)
@@ -34,8 +34,8 @@ export class Experience {
     this.matter = MATTER === 'mother' ? createMotherForm() : createBlob()
     this.scene.add(this.matter.group)
 
-    // screen placement — positive X = right, positive Y = up (world units)
-    this.layout = { offsetX: 0.75, offsetY: 0.28, offsetZ: 0 }
+    // screen placement: -1..1 from viewport center (full canvas stage)
+    this.layout = { screenX: 0.28, screenY: 0.08, depth: 0 }
 
     // pointer state
     this.mouseTarget = new THREE.Vector3(0, 0, 1) // direction, used by blob
@@ -47,8 +47,10 @@ export class Experience {
     this.tiltY = 0
 
     this._onMove = (e) => {
-      const nx = (e.clientX / innerWidth) * 2 - 1
-      const ny = -(e.clientY / innerHeight) * 2 + 1
+      const vw = visualViewport?.width ?? innerWidth
+      const vh = visualViewport?.height ?? innerHeight
+      const nx = (e.clientX / vw) * 2 - 1
+      const ny = -(e.clientY / vh) * 2 + 1
       this.pointerNdc.set(nx, ny)
       this.pointerActive = true
       this.mouseTarget.set(nx * 1.4, ny * 1.0, 0.9).normalize()
@@ -63,6 +65,7 @@ export class Experience {
     addEventListener('pointerdown', this._onDown)
     addEventListener('pointerup', this._onUp)
     addEventListener('resize', this._onResize)
+    visualViewport?.addEventListener('resize', this._onResize)
 
     this.clock = new THREE.Clock()
     this._ray = new THREE.Vector3()
@@ -93,11 +96,24 @@ export class Experience {
     this._ampTarget = name === 'hero' ? 0.30 : 0.18
   }
 
-  /** pointer NDC → world point on the z=0 plane (where the matter lives) */
+  /** map layout.screenX/Y (−1..1, viewport center) → world position on the matter plane */
+  matterWorldPosition(target) {
+    const dist = this.camera.position.z - this.layout.depth
+    const halfH = dist * Math.tan((this.camera.fov * Math.PI) / 360)
+    const halfW = halfH * this.camera.aspect
+    return target.set(
+      this.layout.screenX * halfW,
+      this.layout.screenY * halfH,
+      this.layout.depth,
+    )
+  }
+
+  /** pointer NDC → world point on the matter plane (follows layout.depth) */
   cursorWorld() {
+    const planeZ = this.layout.depth
     this._ray.set(this.pointerNdc.x, this.pointerNdc.y, 0.5).unproject(this.camera)
     this._ray.sub(this.camera.position).normalize()
-    const dist = -this.camera.position.z / this._ray.z
+    const dist = (planeZ - this.camera.position.z) / this._ray.z
     return this._cursorWorld.copy(this.camera.position).addScaledVector(this._ray, dist)
   }
 
@@ -106,7 +122,7 @@ export class Experience {
     this.hover += (this.hoverTarget - this.hover) * 0.07
 
     const g = this.matter.group
-    g.position.set(this.layout.offsetX, this.layout.offsetY, this.layout.offsetZ)
+    this.matterWorldPosition(g.position)
 
     if (MATTER === 'mother') {
       const cursor = this.pointerActive ? this.cursorWorld() : null
@@ -130,8 +146,10 @@ export class Experience {
   }
 
   resize() {
-    this.renderer.setSize(innerWidth, innerHeight)
-    this.camera.aspect = innerWidth / innerHeight
+    const w = Math.round(visualViewport?.width ?? innerWidth)
+    const h = Math.round(visualViewport?.height ?? innerHeight)
+    this.renderer.setSize(w, h, false)
+    this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
   }
 
@@ -143,6 +161,7 @@ export class Experience {
     removeEventListener('pointerdown', this._onDown)
     removeEventListener('pointerup', this._onUp)
     removeEventListener('resize', this._onResize)
+    visualViewport?.removeEventListener('resize', this._onResize)
     this.scene.environment?.dispose()
     this.renderer.dispose()
   }

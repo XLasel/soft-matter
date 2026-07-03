@@ -22,15 +22,33 @@ export function attachDebugControls(experience) {
   }
 
   const layoutFolder = gui.addFolder('Position on screen')
-  layoutFolder.add(layout, 'offsetX', -2, 2, 0.01).name('X (right +)').onChange(log)
-  layoutFolder.add(layout, 'offsetY', -2, 2, 0.01).name('Y (up +)').onChange(log)
-  layoutFolder.add(layout, 'offsetZ', -1, 1, 0.01).name('Z (closer +)').onChange(log)
+  layoutFolder.add(layout, 'screenX', -1, 1, 0.01).name('X (−1 left … 1 right)').onChange(log)
+  layoutFolder.add(layout, 'screenY', -1, 1, 0.01).name('Y (−1 bottom … 1 top)').onChange(log)
+  layoutFolder.add(layout, 'depth', -1.5, 1.5, 0.01).name('depth (world Z)').onChange(log)
   layoutFolder.open()
 
   const sizeFolder = gui.addFolder('Size & surface')
   sizeFolder.add(p, 'scale', 0.4, 3, 0.01).name('overall scale').onChange(log)
   sizeFolder.add(p, 'isolation', 20, 120, 1).name('isolation (lower = fatter)').onChange(log)
   sizeFolder.open()
+
+  const pathFolder = gui.addFolder('Path curve')
+  pathFolder.add(p, 'pathEnabled').name('enabled')
+  pathFolder.add(p, 'pathSamples', 8, 40, 1).name('balls (merge ↑)')
+  pathFolder.add(p, 'pathStrength', 0.1, 0.8, 0.01).name('thickness')
+  pathFolder.add(p, 'pathSubtract', 4, 14, 1).name('merge softness ↓')
+  pathFolder.add(p, 'pathSpeed', 0, 0.2, 0.005).name('flow speed')
+  pathFolder.add(p, 'pathFlowAmp', 0, 0.5, 0.01).name('flow bulge')
+  pathFolder.add(p, 'pathSnake').name('snake mode')
+  pathFolder.add(p, 'pathSnakeSpan', 0.2, 0.95, 0.01).name('snake length')
+  p.pathPoints.forEach((pt, i) => {
+    const ptFolder = pathFolder.addFolder(`point ${i}`)
+    ptFolder.add(pt, 'x', 0.05, 0.95, 0.01)
+    ptFolder.add(pt, 'y', 0.05, 0.95, 0.01)
+    ptFolder.add(pt, 'z', 0.2, 0.8, 0.01)
+  })
+  pathFolder.add(p, 'fieldMargin', 0.02, 0.12, 0.005).name('field safe margin')
+  pathFolder.open()
 
   const coreFolder = gui.addFolder('Nucleus')
   coreFolder.add(p, 'coreStrength', 0.1, 1.2, 0.01)
@@ -55,7 +73,7 @@ export function attachDebugControls(experience) {
 
   const camFolder = gui.addFolder('Camera & light')
   const camState = { distance: camera.position.z, fov: camera.fov, exposure: renderer.toneMappingExposure }
-  camFolder.add(camState, 'distance', 1.5, 8, 0.05).name('distance').onChange((v) => {
+  camFolder.add(camState, 'distance', 2, 10, 0.05).name('distance').onChange((v) => {
     camera.position.z = v
     log()
   })

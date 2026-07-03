@@ -16,14 +16,34 @@ export function createMotherForm() {
     scale: 1.95,         // overall size on screen (mc.scale)
     resolution: 72,     // field grid; 48–80 is the sane range
     isolation: 80,      // surface threshold — lower = fatter matter
-    coreBalls: 4,       // the breathing nucleus
+
+    // --- liquid line along a spline (field space [0..1]³) ---
+    pathEnabled: true,
+    pathSamples: 28,       // more → smoother merged tube
+    pathStrength: 0.36,
+    pathSubtract: 9,       // lower than core subtract → softer merge into one line
+    pathSpeed: 0.055,      // pulse / snake travel along the curve
+    pathFlowAmp: 0.22,     // traveling bulge on the tube
+    pathSnake: false,      // true = a segment crawls along; false = full merged line
+    pathSnakeSpan: 0.55,   // how much of the curve the snake occupies (0..1)
+    pathPoints: [
+      { x: 0.38, y: 0.40, z: 0.50 },
+      { x: 0.46, y: 0.50, z: 0.52 },
+      { x: 0.54, y: 0.56, z: 0.50 },
+      { x: 0.62, y: 0.50, z: 0.48 },
+      { x: 0.70, y: 0.58, z: 0.50 },
+    ],
+
+    fieldMargin: 0.04,  // keep metaballs off the marching-cubes box walls
+
+    coreBalls: 0,       // 0 = off; nucleus is optional when path is the main form
     coreStrength: 0.7,
     coreRadius: 0.11,   // how far the nucleus balls wander (field units)
-    droplets: 2,        // satellites that pinch off and return
+    droplets: 0,        // satellites that pinch off and return
     dropletStrength: 0.34,
     dropletReach: 0.36, // how far a droplet travels before returning
     dropletSpeed: 0.07, // cycles per second (slow!)
-    hole: true,         // negative ball sweeping through → hole opens & heals
+    hole: false,        // negative ball sweeping through → hole opens & heals
     holePeriod: 16,     // seconds between passes
     holeStrength: -0.55,
     subtract: 12,
@@ -49,12 +69,62 @@ export function createMotherForm() {
   group.add(mc)
 
   const _local = new THREE.Vector3()
+  const _pathPos = new THREE.Vector3()
+  const pathCurve = new THREE.CatmullRomCurve3(
+    params.pathPoints.map((p) => new THREE.Vector3(p.x, p.y, p.z)),
+  )
 
-  /** world point → field space [0..1], clamped so the ball stays inside the box */
+  function syncPathCurve() {
+    for (let i = 0; i < params.pathPoints.length; i++) {
+      const p = params.pathPoints[i]
+      pathCurve.points[i].set(p.x, p.y, p.z)
+    }
+  }
+
+  /** metaballs along the spline — dense enough to fuse into one liquid line */
+  function addPathTube(t, S) {
+    if (!params.pathEnabled) return
+
+    syncPathCurve()
+    const n = params.pathSamples
+    const sub = params.pathSubtract
+    const flow = t * params.pathSpeed
+
+    if (params.pathSnake) {
+      const head = flow % 1
+      const span = params.pathSnakeSpan
+      for (let i = 0; i < n; i++) {
+        const u = head - (i / (n - 1)) * span
+        if (u < 0 || u > 1) continue
+        pathCurve.getPoint(u, _pathPos)
+        const tail = i / (n - 1)
+        const pulse = 1 + params.pathFlowAmp * Math.sin(t * 1.1 - tail * Math.PI)
+        const strength = params.pathStrength * (1 - tail * 0.25) * pulse
+        mc.addBall(_pathPos.x, _pathPos.y, _pathPos.z, strength, sub)
+      }
+      pathCurve.getPoint(head, attractors[0].p)
+    } else {
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1)
+        pathCurve.getPoint(u, _pathPos)
+        // wave runs along the merged tube — reads as matter pulling along the line
+        const pulse = 1 + params.pathFlowAmp * Math.sin((u - flow) * Math.PI * 4)
+        const breathe = 1 + 0.07 * Math.sin(t * 0.65 + u * 8)
+        mc.addBall(_pathPos.x, _pathPos.y, _pathPos.z, params.pathStrength * pulse * breathe, sub)
+      }
+      const headU = ((flow % 1) + 1) % 1
+      pathCurve.getPoint(headU, attractors[0].p)
+    }
+
+    attractors[0].r = params.beadPickupCore
+  }
+
+  /** world point → field space [0..1], clamped inside the metaball box */
   function worldToField(v) {
+    const m = params.fieldMargin
     _local.copy(v)
     mc.worldToLocal(_local)
-    return _local.multiplyScalar(0.5).addScalar(0.5).clampScalar(0.08, 0.92)
+    return _local.multiplyScalar(0.5).addScalar(0.5).clampScalar(m, 1 - m)
   }
 
   // attractor slots (field space), refilled every frame: [0] = nucleus, rest = droplets
@@ -132,9 +202,13 @@ export function createMotherForm() {
     mc.reset()
     const S = params.subtract
 
-    // --- breathing nucleus (also attractor [0]) ---
-    attractors[0].p.set(0.5, 0.5, 0.5)
-    attractors[0].r = params.beadPickupCore
+    addPathTube(t, S)
+
+    // --- optional breathing nucleus ---
+    if (params.coreBalls > 0 && !params.pathEnabled) {
+      attractors[0].p.set(0.5, 0.5, 0.5)
+      attractors[0].r = params.beadPickupCore
+    }
     for (let i = 0; i < params.coreBalls; i++) {
       const o = i * 2.399 // golden-angle offset so balls don't sync
       const r = params.coreRadius * (0.6 + 0.4 * Math.sin(t * 0.5 + o * 2.0))
@@ -181,5 +255,5 @@ export function createMotherForm() {
     mc.update()
   }
 
-  return { group, mc, params, update }
+  return { group, mc, params, pathCurve, update }
 }
