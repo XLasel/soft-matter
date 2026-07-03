@@ -1,6 +1,15 @@
 import * as THREE from 'three'
 import { buildEnvironment } from './environment.js'
 import { createBlob } from './Blob.js'
+import { createMotherForm } from './MotherForm.js'
+
+/**
+ * Matter mode switch (rough toggle for now):
+ *   'mother' — marching cubes metaball substance: droplets pinch off & merge,
+ *              holes open & heal, cursor is a field source (MotherForm.js)
+ *   'blob'   — the original displaced icosphere + satellites (Blob.js)
+ */
+const MATTER = 'mother'
 
 /**
  * Owns renderer / scene / camera / loop.
@@ -18,17 +27,17 @@ export class Experience {
     this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50)
     this.camera.position.set(0, 0, 3.6)
 
-    this.blob = createBlob()
-    this.scene.add(this.blob.group)
+    // start HDR load early — chrome is fully metallic and reads black without env
+    const envReady = buildEnvironment(this.renderer)
 
-    // reflections + lighting; page CSS gradient stays as the visible background
-    buildEnvironment(this.renderer).then((envMap) => {
-      this.scene.environment = envMap
-      this.scene.environmentRotation.set(-0.1, Math.PI * 0.1, 0)
-    })
+    this.matter = MATTER === 'mother' ? createMotherForm() : createBlob()
+    this.scene.add(this.matter.group)
 
     // pointer state
-    this.mouseTarget = new THREE.Vector3(0, 0, 1)
+    this.mouseTarget = new THREE.Vector3(0, 0, 1) // direction, used by blob
+    this.pointerNdc = new THREE.Vector2(0, 0)     // raw NDC, used by mother form
+    this.pointerActive = false
+    this.hover = 0
     this.hoverTarget = 0
     this.tiltX = 0
     this.tiltY = 0
@@ -36,6 +45,8 @@ export class Experience {
     this._onMove = (e) => {
       const nx = (e.clientX / innerWidth) * 2 - 1
       const ny = -(e.clientY / innerHeight) * 2 + 1
+      this.pointerNdc.set(nx, ny)
+      this.pointerActive = true
       this.mouseTarget.set(nx * 1.4, ny * 1.0, 0.9).normalize()
       this.hoverTarget = 0.85
       this.tiltX = ny * 0.12
@@ -50,33 +61,63 @@ export class Experience {
     addEventListener('resize', this._onResize)
 
     this.clock = new THREE.Clock()
+    this._ray = new THREE.Vector3()
+    this._cursorWorld = new THREE.Vector3()
     this.resize()
-    this.renderer.setAnimationLoop(() => this.tick())
+
+    // reflections + lighting; page CSS gradient stays visible until the first frame
+    envReady
+      .then((envMap) => {
+        this.scene.environment = envMap
+        this.scene.environmentRotation.set(-0.1, Math.PI * 0.1, 0)
+      })
+      .catch((err) => console.error('Failed to load environment map', err))
+      .finally(() => {
+        if (!this._disposed) this.renderer.setAnimationLoop(() => this.tick())
+      })
   }
 
   /**
    * Called by the section IntersectionObserver in App.vue.
-   * TODO: drive the matter per section — e.g. morph target weights,
-   * camera position, uAmp — so one substance flows through the whole site.
+   * TODO: drive the matter per section — e.g. droplet reach, camera, isolation —
+   * so one substance flows through the whole site.
    */
   setSection(name) {
     this.section = name
-    // example placeholder: calmer matter outside the hero
-    const amp = name === 'hero' ? 0.30 : 0.18
-    this._ampTarget = amp
+    this._ampTarget = name === 'hero' ? 0.30 : 0.18
+  }
+
+  /** pointer NDC → world point on the z=0 plane (where the matter lives) */
+  cursorWorld() {
+    this._ray.set(this.pointerNdc.x, this.pointerNdc.y, 0.5).unproject(this.camera)
+    this._ray.sub(this.camera.position).normalize()
+    const dist = -this.camera.position.z / this._ray.z
+    return this._cursorWorld.copy(this.camera.position).addScaledVector(this._ray, dist)
   }
 
   tick() {
     const t = this.clock.getElapsedTime()
-    const u = this.blob.uniforms
-    u.uMouse.value.lerp(this.mouseTarget, 0.06)
-    u.uHover.value += (this.hoverTarget - u.uHover.value) * 0.07
-    if (this._ampTarget !== undefined) {
-      u.uAmp.value += (this._ampTarget - u.uAmp.value) * 0.04
+    this.hover += (this.hoverTarget - this.hover) * 0.07
+
+    if (MATTER === 'mother') {
+      const cursor = this.pointerActive ? this.cursorWorld() : null
+      this.matter.update(t, { cursor, hover: this.hover })
+      // gentle parallax lean toward the pointer
+      const g = this.matter.group
+      g.rotation.y += (this.tiltY * 0.3 - g.rotation.y) * 0.04
+      g.rotation.x += (-this.tiltX * 0.3 - g.rotation.x) * 0.04
+    } else {
+      const u = this.matter.uniforms
+      u.uMouse.value.lerp(this.mouseTarget, 0.06)
+      u.uHover.value += (this.hoverTarget - u.uHover.value) * 0.07
+      if (this._ampTarget !== undefined) {
+        u.uAmp.value += (this._ampTarget - u.uAmp.value) * 0.04
+      }
+      this.matter.update(t, { tiltX: this.tiltX, tiltY: this.tiltY })
     }
+
     // slow env rotation — cheap with scene.environmentRotation (r163+)
     this.scene.environmentRotation.y = t * 0.04
-    this.blob.update(t, { tiltX: this.tiltX, tiltY: this.tiltY })
     this.renderer.render(this.scene, this.camera)
   }
 
@@ -87,6 +128,7 @@ export class Experience {
   }
 
   dispose() {
+    this._disposed = true
     this.renderer.setAnimationLoop(null)
     removeEventListener('pointermove', this._onMove)
     removeEventListener('pointerdown', this._onDown)

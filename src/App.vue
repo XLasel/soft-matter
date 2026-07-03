@@ -38,10 +38,10 @@ onBeforeUnmount(() => {
   <TheNav />
   <main>
     <SectionHero />
-    <SectionAbout />
+    <!-- <SectionAbout />
     <SectionApproach />
     <SectionNotes />
-    <SectionConnect />
+    <SectionConnect /> -->
   </main>
   <div class="grain" />
 </template>
