@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { buildEnvironment } from './environment.js'
 import { createBlob } from './Blob.js'
 import { createMotherForm } from './MotherForm.js'
+import { attachDebugControls } from './debugControls.js'
 
 /**
  * Matter mode switch (rough toggle for now):
@@ -32,6 +33,9 @@ export class Experience {
 
     this.matter = MATTER === 'mother' ? createMotherForm() : createBlob()
     this.scene.add(this.matter.group)
+
+    // screen placement — positive X = right, positive Y = up (world units)
+    this.layout = { offsetX: 0.75, offsetY: 0.28, offsetZ: 0 }
 
     // pointer state
     this.mouseTarget = new THREE.Vector3(0, 0, 1) // direction, used by blob
@@ -75,6 +79,8 @@ export class Experience {
       .finally(() => {
         if (!this._disposed) this.renderer.setAnimationLoop(() => this.tick())
       })
+
+    this._debug = attachDebugControls(this)
   }
 
   /**
@@ -99,11 +105,13 @@ export class Experience {
     const t = this.clock.getElapsedTime()
     this.hover += (this.hoverTarget - this.hover) * 0.07
 
+    const g = this.matter.group
+    g.position.set(this.layout.offsetX, this.layout.offsetY, this.layout.offsetZ)
+
     if (MATTER === 'mother') {
       const cursor = this.pointerActive ? this.cursorWorld() : null
       this.matter.update(t, { cursor, hover: this.hover })
       // gentle parallax lean toward the pointer
-      const g = this.matter.group
       g.rotation.y += (this.tiltY * 0.3 - g.rotation.y) * 0.04
       g.rotation.x += (-this.tiltX * 0.3 - g.rotation.x) * 0.04
     } else {
@@ -129,6 +137,7 @@ export class Experience {
 
   dispose() {
     this._disposed = true
+    this._debug?.dispose()
     this.renderer.setAnimationLoop(null)
     removeEventListener('pointermove', this._onMove)
     removeEventListener('pointerdown', this._onDown)

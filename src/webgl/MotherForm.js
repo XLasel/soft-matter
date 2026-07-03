@@ -13,7 +13,8 @@ import { createChromeMaterial } from './chromeMaterial.js'
  */
 export function createMotherForm() {
   const params = {
-    resolution: 56,     // field grid; 48–80 is the sane range
+    scale: 1.95,         // overall size on screen (mc.scale)
+    resolution: 72,     // field grid; 48–80 is the sane range
     isolation: 80,      // surface threshold — lower = fatter matter
     coreBalls: 4,       // the breathing nucleus
     coreStrength: 0.7,
@@ -25,14 +26,24 @@ export function createMotherForm() {
     hole: true,         // negative ball sweeping through → hole opens & heals
     holePeriod: 16,     // seconds between passes
     holeStrength: -0.55,
-    cursorStrength: 0.3,
     subtract: 12,
+
+    // --- interactive bead: matter the cursor can steal and give back ---
+    beadStrength: 0.22,
+    beadFollow: 0.09,        // spring toward cursor; lower = laggier, easier to lose
+    beadAttract: 0.12,       // max pull per frame toward an attractor
+    beadAttractRadius: 0.22, // attraction starts working inside this distance
+    beadPickupCore: 0.26,    // come this close to the nucleus → it beads out to you
+    beadPickupDroplet: 0.14, // same for free-floating droplets
+    beadAbsorbDist: 0.11,    // bead this close to matter can be reclaimed...
+    beadBreakDist: 0.17,     // ...if the cursor is farther than this (yank away!)
+    beadCooldown: 1.0,       // seconds before matter offers a new bead
   }
 
   const material = createChromeMaterial(null, { displaced: false })
   const mc = new MarchingCubes(params.resolution, material, false, false, 90000)
   mc.isolation = params.isolation
-  mc.scale.set(1.6, 1.6, 1.6)
+  mc.scale.setScalar(params.scale)
 
   const group = new THREE.Group()
   group.add(mc)
@@ -46,11 +57,84 @@ export function createMotherForm() {
     return _local.multiplyScalar(0.5).addScalar(0.5).clampScalar(0.08, 0.92)
   }
 
+  // attractor slots (field space), refilled every frame: [0] = nucleus, rest = droplets
+  const attractors = Array.from({ length: 1 + params.droplets }, () => ({
+    p: new THREE.Vector3(), r: 0,
+  }))
+
+  function nearestAttractor(p) {
+    let best = null
+    let bestDist = Infinity
+    for (const a of attractors) {
+      const d = a.p.distanceTo(p)
+      if (d < bestDist) { bestDist = d; best = a }
+    }
+    return { a: best, dist: bestDist }
+  }
+
+  // the bead the cursor can steal — a tiny state machine
+  const bead = {
+    state: 'idle', // idle | carried | absorbing
+    pos: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+    strength: 0,
+    cooldownUntil: 0,
+  }
+
+  function updateBead(t, f /* cursor in field space, or null */, hover) {
+    const b = bead
+
+    if (b.state === 'idle') {
+      // cursor is nothing to the field until it comes close enough —
+      // then the matter beads out toward it
+      if (f && t > b.cooldownUntil) {
+        const { a, dist } = nearestAttractor(f)
+        if (a && dist < a.r) {
+          b.pos.copy(a.p).lerp(f, 0.7)
+          b.strength = 0.01
+          b.state = 'carried'
+        }
+      }
+    } else if (b.state === 'carried') {
+      b.strength += (params.beadStrength - b.strength) * 0.08
+      // spring toward cursor (with lag — that's what makes escape possible)
+      if (f) b.pos.lerp(f, params.beadFollow)
+      // tug of war: nearby matter pulls the bead back
+      const { a, dist } = nearestAttractor(b.pos)
+      if (a && dist < params.beadAttractRadius) {
+        const pull = params.beadAttract * (1 - dist / params.beadAttractRadius)
+        b.pos.lerp(a.p, pull)
+      }
+      // reclaim: bead близко к материи, а курсор уже успел сбежать
+      const dCursor = f ? b.pos.distanceTo(f) : Infinity
+      if (dist < params.beadAbsorbDist && dCursor > params.beadBreakDist) {
+        b.state = 'absorbing'
+        b.target.copy(a.p)
+      }
+    } else { // absorbing
+      b.pos.lerp(b.target, 0.15)
+      b.strength *= 0.88
+      if (b.strength < 0.02) {
+        b.strength = 0
+        b.state = 'idle'
+        b.cooldownUntil = t + params.beadCooldown
+      }
+    }
+
+    if (b.strength > 0.015) {
+      mc.addBall(b.pos.x, b.pos.y, b.pos.z, b.strength * (0.8 + hover * 0.4), params.subtract)
+    }
+  }
+
   function update(t, { cursor = null, hover = 0 } = {}) {
+    mc.isolation = params.isolation
+    mc.scale.setScalar(params.scale)
     mc.reset()
     const S = params.subtract
 
-    // --- breathing nucleus ---
+    // --- breathing nucleus (also attractor [0]) ---
+    attractors[0].p.set(0.5, 0.5, 0.5)
+    attractors[0].r = params.beadPickupCore
     for (let i = 0; i < params.coreBalls; i++) {
       const o = i * 2.399 // golden-angle offset so balls don't sync
       const r = params.coreRadius * (0.6 + 0.4 * Math.sin(t * 0.5 + o * 2.0))
@@ -68,12 +152,13 @@ export function createMotherForm() {
       const travel = Math.pow(Math.sin(Math.PI * phase), 2) // 0 → out → 0
       const reach = 0.06 + params.dropletReach * travel
       const ang = t * 0.15 + i * Math.PI // slow orbital drift
-      mc.addBall(
-        0.5 + Math.cos(ang) * reach,
-        0.5 + Math.sin(ang * 0.7) * reach * 0.6,
-        0.5 + Math.sin(ang) * reach * 0.5,
-        params.dropletStrength, S,
-      )
+      const dx = 0.5 + Math.cos(ang) * reach
+      const dy = 0.5 + Math.sin(ang * 0.7) * reach * 0.6
+      const dz = 0.5 + Math.sin(ang) * reach * 0.5
+      mc.addBall(dx, dy, dz, params.dropletStrength, S)
+      // droplet is also an attractor — you can feed the bead to it
+      attractors[1 + i].p.set(dx, dy, dz)
+      attractors[1 + i].r = params.beadPickupDroplet
     }
 
     // --- the hole: a negative ball sweeps through, carving a passage that heals ---
@@ -90,11 +175,8 @@ export function createMotherForm() {
       }
     }
 
-    // --- cursor as a field source: matter reaches for the pointer ---
-    if (cursor) {
-      const f = worldToField(cursor)
-      mc.addBall(f.x, f.y, f.z, params.cursorStrength * (0.4 + hover), S)
-    }
+    // --- the stealable bead (cursor no longer carries matter by default) ---
+    updateBead(t, cursor ? worldToField(cursor) : null, hover)
 
     mc.update()
   }
